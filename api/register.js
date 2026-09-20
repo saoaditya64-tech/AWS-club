@@ -75,6 +75,13 @@ module.exports = (req, res) => {
     registrations.unshift(newRecord);
     saveRegistrations(registrations);
 
+    // Asynchronously forward to Google Sheets
+    fetch('https://script.google.com/macros/s/AKfycbz2nqsYrezuQ-FTOGoQQbDKpdEZW8ZPSLGx5YZzUhe29650r0Jb9ABoNWRVndstq-JJ/exec', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newRecord)
+    }).catch(e => console.warn('Google Sheet sync notice:', e.message));
+
     const whatsappText = `🚀 *NEW REGISTRATION — AWS COMMUNITY DAY* 🚀\n` +
       `━━━━━━━━━━━━━━━━━━━━\n` +
       `🎟️ *Pass ID*: #${newRecord.id}\n` +

@@ -784,6 +784,10 @@
           ⚙️ WhatsApp Settings
         </button>
 
+        <a href="https://script.google.com/macros/s/AKfycbz2nqsYrezuQ-FTOGoQQbDKpdEZW8ZPSLGx5YZzUhe29650r0Jb9ABoNWRVndstq-JJ/exec" target="_blank" class="btn btn-outline" style="border-color: rgba(16, 185, 129, 0.4); color: #34d399;" title="Google Sheet Webhook (Live JSON & Sync)">
+          🟢 Google Sheet Live ↗
+        </a>
+
         <!-- EXCEL EXPORT BUTTON -->
         <button class="btn btn-excel" id="exportExcelBtn" title="Export registrations directly to formatted Excel">
           📊 Export to Excel (.xlsx)
@@ -986,31 +990,49 @@
       setTimeout(() => toast.classList.remove('show'), 3500);
     }
 
-    // Fetch Registrations from server (with localStorage fallback)
+    const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbz2nqsYrezuQ-FTOGoQQbDKpdEZW8ZPSLGx5YZzUhe29650r0Jb9ABoNWRVndstq-JJ/exec';
+
+    // Fetch Registrations from server and Google Sheet (with localStorage fallback)
     async function loadData() {
       const localList = JSON.parse(localStorage.getItem('aws_registrations_cache') || '[]');
+      let serverList = [];
+      let sheetList = [];
+
+      // 1. Try local server API
       try {
         const res = await fetch('/api/registrations');
         if (res.ok) {
           const data = await res.json();
-          const serverList = data.registrations || [];
-          const map = new Map();
-          [...serverList, ...localList].forEach(item => {
-            if (item && item.id) map.set(item.id, item);
-          });
-          allRegistrations = Array.from(map.values());
-          settings = data.settings || {};
-          if (!settings.adminWhatsApp) settings.adminWhatsApp = '919343756202';
-          localStorage.setItem('aws_registrations_cache', JSON.stringify(allRegistrations));
-          localStorage.setItem('aws_settings_cache', JSON.stringify(settings));
-        } else {
-          throw new Error('Server returned non-200');
+          serverList = data.registrations || [];
+          if (data.settings) settings = data.settings;
         }
       } catch (err) {
-        console.warn('Backend not reachable, loading from browser local cache:', err);
-        allRegistrations = localList;
-        settings = JSON.parse(localStorage.getItem('aws_settings_cache') || '{"adminWhatsApp":"919343756202"}');
+        console.warn('Local backend not reachable:', err);
       }
+
+      // 2. Try Google Sheets Webhook directly
+      try {
+        const sheetRes = await fetch(GOOGLE_SCRIPT_URL);
+        if (sheetRes.ok) {
+          const sheetData = await sheetRes.json();
+          if (sheetData && Array.isArray(sheetData.registrations)) {
+            sheetList = sheetData.registrations;
+          }
+        }
+      } catch (sheetErr) {
+        console.warn('Google Sheet direct fetch warning:', sheetErr);
+      }
+
+      // Merge all sources by ID
+      const map = new Map();
+      [...serverList, ...sheetList, ...localList].forEach(item => {
+        if (item && item.id) map.set(item.id, item);
+      });
+      allRegistrations = Array.from(map.values());
+
+      if (!settings.adminWhatsApp) settings.adminWhatsApp = '919343756202';
+      localStorage.setItem('aws_registrations_cache', JSON.stringify(allRegistrations));
+      localStorage.setItem('aws_settings_cache', JSON.stringify(settings));
 
       updateUI();
     }

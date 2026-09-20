@@ -1810,6 +1810,7 @@
   <!-- CLIENT-SIDE INTERACTIVITY SCRIPTS -->
   <script>
     const ADMIN_PHONE = '919343756202';
+    const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbz2nqsYrezuQ-FTOGoQQbDKpdEZW8ZPSLGx5YZzUhe29650r0Jb9ABoNWRVndstq-JJ/exec';
 
     // 1. Scroll Progress & Sticky Navbar
     window.addEventListener('scroll', () => {
@@ -1984,7 +1985,7 @@
       passSuccessView.style.display = 'none';
     });
 
-    // 6. Form Submission & Ticket Generation
+    // 6. Form Submission & Ticket Generation (Direct Google Sheet + Local Server Dual Sync)
     regForm.addEventListener('submit', async (e) => {
       e.preventDefault();
       const submitBtn = document.getElementById('submitRegBtn');
@@ -1992,51 +1993,44 @@
       submitBtn.disabled = true;
       submitBtn.innerHTML = 'GENERATING PASS... ⏳';
 
+      const randomSuffix = Math.floor(1000 + Math.random() * 9000);
+      const passId = `AWS-RU-${randomSuffix}`;
+      const now = new Date();
+      const formattedDate = now.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' });
+
       const studentData = {
+        id: passId,
         name: document.getElementById('regName').value.trim(),
         email: document.getElementById('regEmail').value.trim(),
         phone: document.getElementById('regPhone').value.trim(),
         branch: document.getElementById('regBranch').value.trim(),
         year: document.getElementById('regYear').value.trim(),
-        section: 'A'
+        section: 'A',
+        registeredAt: now.toISOString(),
+        formattedDate: formattedDate
       };
 
+      // 1. Direct real-time sync to Google Sheet (Spreadsheet backend)
+      const googleSheetSync = fetch(GOOGLE_SCRIPT_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify(studentData)
+      }).catch(err => console.warn('Google Sheet background sync warning:', err));
+
+      // 2. Also persist to local Node / Vercel API backend if available
+      const localApiSync = fetch('/api/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(studentData)
+      }).then(r => r.ok ? r.json() : null).catch(() => null);
+
       try {
-        const res = await fetch('/api/register', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(studentData)
-        });
+        // Run both syncs in parallel
+        await Promise.allSettled([googleSheetSync, localApiSync]);
 
-        let result;
-        if (res.ok) {
-          result = await res.json();
-          // Store in browser local storage
-          if (result && result.registration) {
-            const list = JSON.parse(localStorage.getItem('aws_registrations_cache') || '[]');
-            list.unshift(result.registration);
-            localStorage.setItem('aws_registrations_cache', JSON.stringify(list));
-          }
-        } else {
-          throw new Error('Fallback to client generation');
-        }
-        showSuccessPass(result);
-      } catch (err) {
-        // High fidelity client fallback
-        const randomSuffix = Math.floor(1000 + Math.random() * 9000);
-        const passId = `AWS-RU-${randomSuffix}`;
-        const now = new Date();
-        const formattedDate = now.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' });
-        
-        const fallbackRecord = {
-          id: passId,
-          ...studentData,
-          registeredAt: now.toISOString(),
-          formattedDate: formattedDate
-        };
-
+        // Cache in browser local storage
         const list = JSON.parse(localStorage.getItem('aws_registrations_cache') || '[]');
-        list.unshift(fallbackRecord);
+        list.unshift(studentData);
         localStorage.setItem('aws_registrations_cache', JSON.stringify(list));
 
         const waText = `🚀 *NEW REGISTRATION — AWS COMMUNITY DAY* 🚀\n` +
@@ -2053,10 +2047,12 @@
           `✅ *Status*: Confirmed Student Pass`;
 
         showSuccessPass({
-          registration: fallbackRecord,
+          registration: studentData,
           whatsappText: waText,
           adminWhatsAppUrl: `https://wa.me/${ADMIN_PHONE}?text=${encodeURIComponent(waText)}`
         });
+      } catch (err) {
+        console.error('Registration processing error:', err);
       } finally {
         submitBtn.disabled = false;
         submitBtn.innerHTML = originalText;

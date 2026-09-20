@@ -4,7 +4,7 @@ const path = require('path');
 const DATA_DIR = path.join('/tmp', 'data');
 const REGISTRATIONS_FILE = path.join(DATA_DIR, 'registrations.json');
 
-module.exports = (req, res) => {
+module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -19,6 +19,24 @@ module.exports = (req, res) => {
       list = JSON.parse(fs.readFileSync(REGISTRATIONS_FILE, 'utf-8') || '[]');
     }
   } catch (e) {}
+
+  // Merge live Google Sheet rows if GET
+  if (req.method === 'GET') {
+    try {
+      const sheetRes = await fetch('https://script.google.com/macros/s/AKfycbz2nqsYrezuQ-FTOGoQQbDKpdEZW8ZPSLGx5YZzUhe29650r0Jb9ABoNWRVndstq-JJ/exec', {
+        signal: AbortSignal.timeout(3500)
+      });
+      if (sheetRes.ok) {
+        const sheetData = await sheetRes.json();
+        if (sheetData && Array.isArray(sheetData.registrations)) {
+          const map = new Map();
+          list.forEach(item => { if (item && item.id) map.set(item.id, item); });
+          sheetData.registrations.forEach(item => { if (item && item.id) map.set(item.id, item); });
+          list = Array.from(map.values());
+        }
+      }
+    } catch (e) {}
+  }
 
   if (req.method === 'DELETE') {
     // Extract ID from query or url path

@@ -6,6 +6,7 @@ const XLSX = require('xlsx');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbz2nqsYrezuQ-FTOGoQQbDKpdEZW8ZPSLGx5YZzUhe29650r0Jb9ABoNWRVndstq-JJ/exec';
 
 // Middleware
 app.use(cors());
@@ -178,6 +179,13 @@ apiRouter.post('/register', (req, res) => {
     registrations.unshift(newRecord);
     saveRegistrations(registrations);
 
+    // Asynchronous backup sync to Google Sheets
+    fetch(GOOGLE_SCRIPT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newRecord)
+    }).catch(e => console.warn('Google Sheet background sync notice:', e.message));
+
     const settings = getSettings();
 
     // Generate formatted WhatsApp message text
@@ -224,11 +232,29 @@ apiRouter.post('/register', (req, res) => {
   }
 });
 
-// API: Get All Registrations & Stats
-apiRouter.get('/registrations', (req, res) => {
+// API: Get All Registrations & Stats (Merged with Google Sheets)
+apiRouter.get('/registrations', async (req, res) => {
   try {
-    const list = getRegistrations();
+    let list = getRegistrations();
     const settings = getSettings();
+
+    // Optionally merge latest from Google Sheets
+    try {
+      const sheetRes = await fetch(GOOGLE_SCRIPT_URL, { signal: AbortSignal.timeout(3500) });
+      if (sheetRes.ok) {
+        const sheetData = await sheetRes.json();
+        if (sheetData && Array.isArray(sheetData.registrations)) {
+          const map = new Map();
+          // Insert local records first
+          list.forEach(item => { if (item && item.id) map.set(item.id, item); });
+          // Merge sheet records
+          sheetData.registrations.forEach(item => { if (item && item.id) map.set(item.id, item); });
+          list = Array.from(map.values());
+        }
+      }
+    } catch (sheetErr) {
+      // Continue with local list if Google Sheet timeout or offline
+    }
 
     // Calculate Analytics
     const total = list.length;
